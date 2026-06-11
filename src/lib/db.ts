@@ -2,6 +2,101 @@ import { supabase, isUsingPlaceholder } from './supabase';
 import { Product, Review, BrandUpdate, Order, UserProfile } from '../types';
 import { PRODUCTS, INITIAL_REVIEWS, INITIAL_UPDATES } from '../data';
 
+// --- Supabase Casing Normalizer Utilities ---
+const PRODUCT_KEY_MAP = {
+  banglaName: 'banglaName',
+  banglaname: 'banglaName',
+  imageUrl: 'imageUrl',
+  imageurl: 'imageUrl',
+  categoryBangla: 'categoryBangla',
+  categorybangla: 'categoryBangla',
+  reviewsCount: 'reviewsCount',
+  reviewscount: 'reviewsCount',
+  isFeatured: 'isFeatured',
+  isfeatured: 'isFeatured'
+};
+
+const REVIEW_KEY_MAP = {
+  productName: 'productName',
+  productname: 'productName',
+  customerName: 'customerName',
+  customername: 'customerName',
+  commentBangla: 'commentBangla',
+  commentbangla: 'commentBangla',
+  isVerifiedPurchase: 'isVerifiedPurchase',
+  isverifiedpurchase: 'isVerifiedPurchase'
+};
+
+const UPDATE_KEY_MAP = {
+  categoryBangla: 'categoryBangla',
+  categorybangla: 'categoryBangla',
+  imageUrl: 'imageUrl',
+  imageurl: 'imageUrl'
+};
+
+const ORDER_KEY_MAP = {
+  totalPrice: 'totalPrice',
+  totalprice: 'totalPrice',
+  shippingInfo: 'shippingInfo',
+  shippinginfo: 'shippingInfo',
+  paymentMethod: 'paymentMethod',
+  paymentmethod: 'paymentMethod'
+};
+
+const PROFILE_KEY_MAP = {
+  avatarUrl: 'avatarUrl',
+  avatarurl: 'avatarUrl'
+};
+
+function normalizeRow<T>(row: any, keyMap: Record<string, string>): T {
+  if (!row) return row;
+  const normalized: any = { ...row };
+  for (const [dbKey, jsKey] of Object.entries(keyMap)) {
+    if (row[dbKey] !== undefined && dbKey !== jsKey) {
+      normalized[jsKey] = row[dbKey];
+    }
+    const lowerKey = jsKey.toLowerCase();
+    if (row[lowerKey] !== undefined && lowerKey !== jsKey) {
+      normalized[jsKey] = row[lowerKey];
+    }
+  }
+  return normalized as T;
+}
+
+function toLowercaseKeys(obj: any): any {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(toLowercaseKeys);
+  }
+  const result: any = {};
+  for (const [key, val] of Object.entries(obj)) {
+    result[key.toLowerCase()] = val;
+  }
+  return result;
+}
+
+// Custom wrapper to perform case-insensitive writes on Supabase
+async function safeInsert(table: string, payload: any) {
+  const response = await supabase.from(table).insert(payload);
+  if (!response.error) {
+    return response;
+  }
+  console.warn(`[Supabase Casing Recovery] Insert to ${table} failed with primary credentials casing, trying lowercase backup. Error:`, response.error.message);
+  const lowercasePayload = toLowercaseKeys(payload);
+  return await supabase.from(table).insert(lowercasePayload);
+}
+
+async function safeUpsert(table: string, payload: any) {
+  const response = await supabase.from(table).upsert(payload);
+  if (!response.error) {
+    return response;
+  }
+  console.warn(`[Supabase Casing Recovery] Upsert to ${table} failed with primary credentials casing, trying lowercase backup. Error:`, response.error.message);
+  const lowercasePayload = toLowercaseKeys(payload);
+  return await supabase.from(table).upsert(lowercasePayload);
+}
+// --------------------------------------------
+
 // Helper to check if Supabase is connected/configured
 const isConfigured = (): boolean => {
   return typeof window !== 'undefined';
@@ -33,10 +128,13 @@ export async function fetchProducts(): Promise<Product[]> {
     }
 
     // Cast and sort
-    const mapped = (data as any[]).map(item => ({
-      ...item,
-      features: Array.isArray(item.features) ? item.features : JSON.parse(item.features || '[]')
-    }));
+    const mapped = (data as any[]).map(item => {
+      const norm = normalizeRow<Product>(item, PRODUCT_KEY_MAP);
+      return {
+        ...norm,
+        features: Array.isArray(norm.features) ? norm.features : JSON.parse((norm.features as any) || '[]')
+      };
+    });
 
     // Cache locally
     localStorage.setItem('bunon_products_v2', JSON.stringify(mapped));
@@ -71,7 +169,7 @@ async function seedProducts(): Promise<Product[] | null> {
       features: p.features // jsonb column handles array directly or as json
     }));
 
-    const { error } = await supabase.from('products').insert(dataToSeed);
+    const { error } = await safeInsert('products', dataToSeed);
     if (error) {
       console.warn('Could not seed products table (perhaps table does not exist yet):', error);
       return null;
@@ -102,7 +200,7 @@ export async function upsertProduct(product: Product): Promise<boolean> {
       features: product.features
     };
 
-    const { error } = await supabase.from('products').upsert(payload);
+    const { error } = await safeUpsert('products', payload);
     if (error) {
       console.error('Supabase upsertProduct error:', error);
       return false;
@@ -154,9 +252,11 @@ export async function fetchReviews(): Promise<Review[]> {
       return getLocalReviews();
     }
 
+    const mapped = (data as any[]).map(item => normalizeRow<Review>(item, REVIEW_KEY_MAP));
+
     // Cache locally
-    localStorage.setItem('bunon_reviews_v2', JSON.stringify(data));
-    return data as Review[];
+    localStorage.setItem('bunon_reviews_v2', JSON.stringify(mapped));
+    return mapped;
   } catch (err) {
     console.error('Fetch reviews error, reading local state:', err);
     return getLocalReviews();
@@ -171,7 +271,7 @@ function getLocalReviews(): Review[] {
 
 async function seedReviews(): Promise<Review[] | null> {
   try {
-    const { error } = await supabase.from('reviews').insert(INITIAL_REVIEWS);
+    const { error } = await safeInsert('reviews', INITIAL_REVIEWS);
     if (error) {
       console.warn('Could not seed reviews table (perhaps table does not exist):', error);
       return null;
@@ -185,7 +285,7 @@ async function seedReviews(): Promise<Review[] | null> {
 
 export async function insertReview(review: Review): Promise<boolean> {
   try {
-    const { error } = await supabase.from('reviews').insert(review);
+    const { error } = await safeInsert('reviews', review);
     if (error) {
       console.error('Supabase insertReview error:', error);
       return false;
@@ -237,9 +337,11 @@ export async function fetchUpdates(): Promise<BrandUpdate[]> {
       return getLocalUpdates();
     }
 
+    const mapped = (data as any[]).map(item => normalizeRow<BrandUpdate>(item, UPDATE_KEY_MAP));
+
     // Cache locally
-    localStorage.setItem('bunon_updates_v2', JSON.stringify(data));
-    return data as BrandUpdate[];
+    localStorage.setItem('bunon_updates_v2', JSON.stringify(mapped));
+    return mapped;
   } catch (err) {
     console.error('Fetch updates error, reading local state:', err);
     return getLocalUpdates();
@@ -254,7 +356,7 @@ function getLocalUpdates(): BrandUpdate[] {
 
 async function seedUpdates(): Promise<BrandUpdate[] | null> {
   try {
-    const { error } = await supabase.from('updates').insert(INITIAL_UPDATES);
+    const { error } = await safeInsert('updates', INITIAL_UPDATES);
     if (error) {
       console.warn('Could not seed updates table:', error);
       return null;
@@ -280,7 +382,7 @@ export async function upsertUpdate(update: BrandUpdate): Promise<boolean> {
       badge: update.badge || null
     };
 
-    const { error } = await supabase.from('updates').upsert(payload);
+    const { error } = await safeUpsert('updates', payload);
     if (error) {
       console.error('Supabase upsertUpdate error:', error);
       return false;
@@ -325,11 +427,14 @@ export async function fetchOrders(): Promise<Order[]> {
       return getLocalOrders();
     }
 
-    const mapped = (data as any[]).map(item => ({
-      ...item,
-      items: typeof item.items === 'string' ? JSON.parse(item.items) : item.items,
-      shippingInfo: typeof item.shippingInfo === 'string' ? JSON.parse(item.shippingInfo) : item.shippingInfo,
-    }));
+    const mapped = (data as any[]).map(item => {
+      const norm = normalizeRow<Order>(item, ORDER_KEY_MAP);
+      return {
+        ...norm,
+        items: typeof norm.items === 'string' ? JSON.parse(norm.items) : norm.items,
+        shippingInfo: typeof norm.shippingInfo === 'string' ? JSON.parse(norm.shippingInfo as any) : norm.shippingInfo,
+      };
+    });
 
     // Cache locally
     localStorage.setItem('bunon_orders_v2', JSON.stringify(mapped));
@@ -358,7 +463,7 @@ export async function insertOrder(order: Order): Promise<boolean> {
       date: order.date
     };
 
-    const { error } = await supabase.from('orders').insert(payload);
+    const { error } = await safeInsert('orders', payload);
     if (error) {
       console.error('Supabase insertOrder error:', error);
       return false;
@@ -508,7 +613,7 @@ export async function syncOrders(newList: Order[], oldList: Order[]) {
         status: item.status,
         date: item.date
       };
-      const { error } = await supabase.from('orders').upsert(payload);
+      const { error } = await safeUpsert('orders', payload);
       if (error) {
         console.error('👥 [Supabase Sync] Failed to upsert order in database:', error.message, 'Details:', error.details);
       }
@@ -551,7 +656,7 @@ export async function fetchProfileFromDb(query: string): Promise<UserProfile | n
     const phoneCandidates = [cleanQuery];
     if (normalizedQuery) {
       if (!phoneCandidates.includes(normalizedQuery)) {
-        phoneCandidates.push(normalizedQuery);
+         phoneCandidates.push(normalizedQuery);
       }
       const rawDigits = normalizedQuery.startsWith('0') ? normalizedQuery.substring(1) : normalizedQuery;
       const variations = [
@@ -576,7 +681,8 @@ export async function fetchProfileFromDb(query: string): Promise<UserProfile | n
       .in('phone', phoneCandidates);
       
     if (!phoneErr && phoneData && phoneData.length > 0) {
-      const p = phoneData[0];
+      const rawP = phoneData[0];
+      const p = normalizeRow<UserProfile>(rawP, PROFILE_KEY_MAP);
       return {
         name: p.name,
         phone: p.phone,
@@ -592,7 +698,8 @@ export async function fetchProfileFromDb(query: string): Promise<UserProfile | n
       .eq('email', cleanQuery);
       
     if (!emailErr && emailData && emailData.length > 0) {
-      const p = emailData[0];
+      const rawP = emailData[0];
+      const p = normalizeRow<UserProfile>(rawP, PROFILE_KEY_MAP);
       return {
         name: p.name,
         phone: p.phone,
@@ -657,14 +764,14 @@ export async function upsertProfileInDb(profile: UserProfile): Promise<boolean> 
   }
 
   try {
-    const { error } = await supabase
-      .from('profiles')
-      .upsert({
-        phone: profile.phone.trim(),
-        name: profile.name,
-        email: profile.email ? profile.email.trim() : null,
-        avatarUrl: profile.avatarUrl || null
-      });
+    const payload = {
+      phone: profile.phone.trim(),
+      name: profile.name,
+      email: profile.email ? profile.email.trim() : null,
+      avatarUrl: profile.avatarUrl || null
+    };
+
+    const { error } = await safeUpsert('profiles', payload);
       
     if (error) {
       console.warn('upsertProfileInDb Supabase non-fatal table warning (using local fallback cache):', error);
