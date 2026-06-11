@@ -18,6 +18,8 @@ import ReviewHub from './components/ReviewHub';
 import UpdatesPage from './components/UpdatesPage';
 import AdminPanel from './components/AdminPanel';
 import PremiumHomeSections from './components/PremiumHomeSections';
+// @ts-ignore - Vite handles static png imports natively, bypass TS module check
+import brandLogo from './assets/images/brand_logo_1780987950455.png';
 
 import { PRODUCTS, INITIAL_REVIEWS, INITIAL_UPDATES } from './data';
 import { Product, CartItem, Order, Review, BrandUpdate, UserProfile } from './types';
@@ -34,6 +36,99 @@ import {
 } from './lib/db';
 
 export default function App() {
+  // Dynamic Premium Rounded Favicon Generator
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const img = new Image();
+    img.src = brandLogo;
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Clean slate canvas
+        ctx.clearRect(0, 0, 256, 256);
+
+        // Draw elegant rounded background container (modern iOS squircle style)
+        const radius = 60; 
+        const padding = 24; 
+        const width = canvas.width;
+        const height = canvas.height;
+
+        ctx.beginPath();
+        ctx.moveTo(radius, 0);
+        ctx.lineTo(width - radius, 0);
+        ctx.quadraticCurveTo(width, 0, width, radius);
+        ctx.lineTo(width, height - radius);
+        ctx.quadraticCurveTo(width, height, width - radius, height);
+        ctx.lineTo(radius, height);
+        ctx.quadraticCurveTo(0, height, 0, height - radius);
+        ctx.lineTo(0, radius);
+        ctx.quadraticCurveTo(0, 0, radius, 0);
+        ctx.closePath();
+
+        // Fill background with elegant dark charcoal color (Zinc-950)
+        ctx.fillStyle = '#0a0a0c';
+        ctx.fill();
+
+        // Stroke premium rich gold border to make the icon outstanding in both light and dark browser tabs
+        ctx.strokeStyle = '#eab308'; // nice amber gold
+        ctx.lineWidth = 10;
+        ctx.stroke();
+
+        ctx.save();
+        // Inner clip to prevent image pixels from overflowing
+        ctx.beginPath();
+        ctx.moveTo(radius, 5);
+        ctx.lineTo(width - radius, 5);
+        ctx.quadraticCurveTo(width - 5, 5, width - 5, radius);
+        ctx.lineTo(width - 5, height - radius);
+        ctx.quadraticCurveTo(width - 5, height - 5, width - radius, height - 5);
+        ctx.lineTo(radius, height - 5);
+        ctx.quadraticCurveTo(5, height - 5, 5, height - radius);
+        ctx.lineTo(5, radius);
+        ctx.quadraticCurveTo(5, 5, radius, 5);
+        ctx.closePath();
+        ctx.clip();
+
+        // Render our beautiful brand logo perfectly centered inside with nice breathing room padding
+        const logoSize = width - (padding * 2);
+        ctx.drawImage(img, padding, padding, logoSize, logoSize);
+        ctx.restore();
+
+        // Convert the styled high-res canvas content to super crisp base64 PNG data URL
+        const faviconUrl = canvas.toDataURL('image/png');
+
+        // Dynamically replace default browser favicons
+        const existingLinks = document.querySelectorAll("link[rel*='icon']");
+        existingLinks.forEach(link => link.remove());
+
+        const newIconLink = document.createElement('link');
+        newIconLink.rel = 'icon';
+        newIconLink.type = 'image/png';
+        newIconLink.href = faviconUrl;
+        document.head.appendChild(newIconLink);
+
+        let appleIconLink = document.querySelector("link[rel='apple-touch-icon']") as HTMLLinkElement;
+        if (!appleIconLink) {
+          appleIconLink = document.createElement('link');
+          appleIconLink.rel = 'apple-touch-icon';
+          document.head.appendChild(appleIconLink);
+        }
+        appleIconLink.href = faviconUrl;
+
+        console.log('✨ Premium dynamic rounded favicon rendered successfully!');
+      } catch (err) {
+        console.error('Error generating dynamic rounded favicon:', err);
+      }
+    };
+  }, []);
+
   // Navigation State
   const [currentView, setView] = useState<string>('home'); // home, products, product-detail, cart, checkout, orders, reviews, updates, admin
   
