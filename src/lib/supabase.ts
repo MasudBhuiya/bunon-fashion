@@ -14,11 +14,31 @@ if (typeof window !== 'undefined') {
   } catch (e) {}
 }
 
+const isValidUrl = (url: any): boolean => {
+  if (!url || typeof url !== 'string') return false;
+  const clean = url.trim().toLowerCase();
+  if (!clean.startsWith('http')) return false;
+  if (clean.includes('placeholder') || clean.includes('your-') || clean.includes('your_') || clean.includes('example.com')) {
+    return false;
+  }
+  return true;
+};
+
+const isValidKey = (key: any): boolean => {
+  if (!key || typeof key !== 'string') return false;
+  const clean = key.trim();
+  if (clean === '' || clean === 'undefined' || clean === 'null' || clean === 'placeholder_value') return false;
+  if (clean.includes('placeholder') || clean.includes('your-') || clean.includes('your_') || clean.length < 40) {
+    return false;
+  }
+  return true;
+};
+
 const rawUrl = localUrl || import.meta.env.VITE_SUPABASE_URL;
-export const supabaseUrl = (rawUrl && typeof rawUrl === 'string' && rawUrl.startsWith('http')) ? rawUrl : defaultUrl;
+export const supabaseUrl = isValidUrl(rawUrl) ? rawUrl.trim() : defaultUrl;
 
 const rawKey = localKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabaseAnonKey = (rawKey && typeof rawKey === 'string' && rawKey.trim() !== '' && rawKey !== 'undefined') ? rawKey : defaultKey;
+export const supabaseAnonKey = isValidKey(rawKey) ? rawKey.trim() : defaultKey;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

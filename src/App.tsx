@@ -126,11 +126,113 @@ export default function App() {
           fetchOrders()
         ]);
         
-        setProducts(dbProducts);
-        setReviews(dbReviews);
-        setUpdates(dbUpdates);
-        setOrders(dbOrders);
-        console.log('Successfully synced data with Supabase!');
+        // --- Smart Self-Healing Auto-Sync ---
+
+        // A. Orders self-heal
+        let localOrders: Order[] = [];
+        try {
+          const loStr = localStorage.getItem('bunon_orders_v2');
+          localOrders = loStr ? JSON.parse(loStr) : [];
+        } catch (e) {}
+        
+        const localOnlyOrders = localOrders.filter(lo => !dbOrders.some(dbo => dbo.id === lo.id));
+        if (localOnlyOrders.length > 0) {
+          console.log('Self-Healing: Syncing local-only orders to Supabase...', localOnlyOrders);
+          for (const ord of localOnlyOrders) {
+            await syncOrders([ord], []); // Pushes to Supabase
+          }
+        }
+        const mergedOrders = [...dbOrders];
+        localOnlyOrders.forEach(lo => {
+          if (!mergedOrders.some(m => m.id === lo.id)) {
+            mergedOrders.push(lo);
+          }
+        });
+        setOrders(mergedOrders);
+        localStorage.setItem('bunon_orders_v2', JSON.stringify(mergedOrders));
+
+        // B. Products self-heal
+        let localProducts: Product[] = [];
+        try {
+          const lpStr = localStorage.getItem('bunon_products_v2');
+          localProducts = lpStr ? JSON.parse(lpStr) : [];
+        } catch (e) {}
+
+        const localOnlyProducts = localProducts.filter(lp => lp.id.startsWith('prod_') && !dbProducts.some(dbp => dbp.id === lp.id));
+        if (localOnlyProducts.length > 0) {
+          console.log('Self-Healing: Syncing local-only products to Supabase...', localOnlyProducts);
+          for (const prod of localOnlyProducts) {
+            await syncProducts([prod], []); // Pushes to Supabase
+          }
+        }
+        const mergedProducts = [...dbProducts];
+        localOnlyProducts.forEach(lp => {
+          if (!mergedProducts.some(m => m.id === lp.id)) {
+            mergedProducts.push(lp);
+          }
+        });
+        setProducts(mergedProducts);
+        localStorage.setItem('bunon_products_v2', JSON.stringify(mergedProducts));
+
+        // C. Reviews self-heal
+        let localReviews: Review[] = [];
+        try {
+          const lrStr = localStorage.getItem('bunon_reviews_v2');
+          localReviews = lrStr ? JSON.parse(lrStr) : [];
+        } catch (e) {}
+
+        const localOnlyReviews = localReviews.filter(lr => lr.id.startsWith('rev_') && !dbReviews.some(dbr => dbr.id === lr.id));
+        if (localOnlyReviews.length > 0) {
+          console.log('Self-Healing: Syncing local-only reviews to Supabase...', localOnlyReviews);
+          for (const rev of localOnlyReviews) {
+            await syncReviews([rev], []); // Pushes to Supabase
+          }
+        }
+        const mergedReviews = [...dbReviews];
+        localOnlyReviews.forEach(lr => {
+          if (!mergedReviews.some(m => m.id === lr.id)) {
+            mergedReviews.push(lr);
+          }
+        });
+        setReviews(mergedReviews);
+        localStorage.setItem('bunon_reviews_v2', JSON.stringify(mergedReviews));
+
+        // D. Announcements self-heal
+        let localUpdates: BrandUpdate[] = [];
+        try {
+          const luStr = localStorage.getItem('bunon_updates_v2');
+          localUpdates = luStr ? JSON.parse(luStr) : [];
+        } catch (e) {}
+
+        const localOnlyUpdates = localUpdates.filter(lu => lu.id.startsWith('update_') && !dbUpdates.some(dbu => dbu.id === lu.id));
+        if (localOnlyUpdates.length > 0) {
+          console.log('Self-Healing: Syncing local-only announcements to Supabase...', localOnlyUpdates);
+          for (const upd of localOnlyUpdates) {
+            await syncUpdates([upd], []); // Pushes to Supabase
+          }
+        }
+        const mergedUpdates = [...dbUpdates];
+        localOnlyUpdates.forEach(lu => {
+          if (!mergedUpdates.some(m => m.id === lu.id)) {
+            mergedUpdates.push(lu);
+          }
+        });
+        setUpdates(mergedUpdates);
+        localStorage.setItem('bunon_updates_v2', JSON.stringify(mergedUpdates));
+
+        // E. Customer Profile self-heal
+        let localProfile: UserProfile | null = null;
+        try {
+          const lpStr = localStorage.getItem('bunon_user_profile');
+          if (lpStr) localProfile = JSON.parse(lpStr);
+        } catch (e) {}
+
+        if (localProfile) {
+          console.log('Self-Healing: Syncing local customer profile registration to Supabase...', localProfile);
+          await upsertProfileInDb(localProfile);
+        }
+
+        console.log('Successfully synchronized and self-healed all data with Supabase!');
       } catch (err) {
         console.error('Error fetching data from Supabase, relying on local storage fallback:', err);
       }
