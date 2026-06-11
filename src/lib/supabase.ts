@@ -15,10 +15,10 @@ if (typeof window !== 'undefined') {
 }
 
 const rawUrl = localUrl || import.meta.env.VITE_SUPABASE_URL;
-const supabaseUrl = rawUrl || defaultUrl;
+const supabaseUrl = (rawUrl && typeof rawUrl === 'string' && rawUrl.startsWith('http')) ? rawUrl : defaultUrl;
 
 const rawKey = localKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabaseAnonKey = rawKey || defaultKey;
+const supabaseAnonKey = (rawKey && typeof rawKey === 'string' && rawKey.trim() !== '' && rawKey !== 'undefined') ? rawKey : defaultKey;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

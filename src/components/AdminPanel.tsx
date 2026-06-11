@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Order, Product, Review, BrandUpdate, UserProfile } from '../types';
 import { upsertProfileInDb } from '../lib/db';
+import { supabase } from '../lib/supabase';
 
 interface AdminPanelProps {
   orders: Order[];
@@ -88,6 +89,148 @@ export default function AdminPanel({
     setTempPhone(adminPhone);
     setTempAvatar(adminAvatarUrl);
   }, [adminName, adminEmail, adminPhone, adminAvatarUrl]);
+
+  // Diagnostic states
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
+  const [testResult, setTestResult] = useState('');
+  const [customSupaUrl, setCustomSupaUrl] = useState(() => localStorage.getItem('BUNON_SUPABASE_URL') || '');
+  const [customSupaKey, setCustomSupaKey] = useState(() => localStorage.getItem('BUNON_SUPABASE_ANON_KEY') || '');
+
+  const handleTestDatabase = async () => {
+    setTestStatus('testing');
+    setTestResult('');
+    try {
+      const { error } = await supabase.from('products').select('id').limit(1);
+      if (error) {
+        setTestStatus('error');
+        setTestResult(`ডেটাবেজ রেসপন্স ত্রুটি: ${error.message}। সারণি বা কলামগুলো ঠিকমতো তৈরি করা হয়নি হয়তো।`);
+      } else {
+        const { data: configData, error: configError } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('phone', 'ADMIN_CONFIG')
+          .single();
+
+        let extra = '';
+        if (configError) {
+          extra = ' (তবে ADMIN_CONFIG রো-টি পাওয়া যায়নি। নিচে "ডিফল্ট অ্যাডমিন সেটআপ করুন" বাটনে চাপ দিন)';
+        } else {
+          extra = ' (এবং ক্লাউডে সংরক্ষিত অ্যাডমিন পাসওয়ার্ড সফলভাবে সিঙ্ক হয়েছে)';
+        }
+        setTestStatus('success');
+        setTestResult(`সংযোগ সফল! সুপাবেস ডাটাবেজ সচল রয়েছে${extra}।`);
+      }
+    } catch (e: any) {
+      setTestStatus('error');
+      setTestResult(`ভুল কনফিগারেশন বা নেটওয়ার্ক এরর: ${e.message || e}`);
+    }
+  };
+
+  const handleForceCreateAdminConfig = async () => {
+    setTestStatus('testing');
+    try {
+      const defaultConfig = {
+        name: 'মাসউদ ভুঁইয়া',
+        email: 'masudbhuiyan1415@gmail.com',
+        phone: '01855223656',
+        password: 'Masud@2005#',
+        avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?q=80&w=150&auto=format&fit=crop'
+      };
+
+      localStorage.setItem('bunon_admin_name', defaultConfig.name);
+      localStorage.setItem('bunon_admin_email', defaultConfig.email);
+      localStorage.setItem('bunon_admin_phone', defaultConfig.phone);
+      localStorage.setItem('bunon_admin_password', defaultConfig.password);
+      localStorage.setItem('bunon_admin_avatar', defaultConfig.avatarUrl);
+
+      setAdminName(defaultConfig.name);
+      setAdminEmail(defaultConfig.email);
+      setAdminPhone(defaultConfig.phone);
+      setAdminPassword(defaultConfig.password);
+      setAdminAvatarUrl(defaultConfig.avatarUrl);
+
+      const { error } = await supabase.from('profiles').upsert({
+        phone: 'ADMIN_CONFIG',
+        name: 'ADMIN_SETTINGS_METADATA',
+        email: defaultConfig.email,
+        avatarUrl: JSON.stringify(defaultConfig)
+      });
+
+      if (error) {
+        setTestStatus('error');
+        setTestResult(`অ্যাডমিন ডাটাবেজে ক্লাউড সিঙ্ক করতে ব্যর্থ: ${error.message}। তবে লোকাল কুয়েরি সফল হয়েছে এবং ডিভাইস রিসেট করা হয়েছে।`);
+      } else {
+        setTestStatus('success');
+        setTestResult('ডিফল্ট অ্যাডমিন কনফিগ সফলভাবে ডেটাবেজ ও ব্রাউজার মেমরিতে রিসেট করা হয়েছে! এখন আপনি "Masud@2005#" দিয়ে লগইন করতে পারবেন।');
+      }
+    } catch (e: any) {
+      setTestStatus('error');
+      setTestResult(`ভুল হয়েছে: ${e.message || e}`);
+    }
+  };
+
+  const handleSaveCustomSupa = () => {
+    if (customSupaUrl.trim()) {
+      localStorage.setItem('BUNON_SUPABASE_URL', customSupaUrl.trim());
+    } else {
+      localStorage.removeItem('BUNON_SUPABASE_URL');
+    }
+
+    if (customSupaKey.trim()) {
+      localStorage.setItem('BUNON_SUPABASE_ANON_KEY', customSupaKey.trim());
+    } else {
+      localStorage.removeItem('BUNON_SUPABASE_ANON_KEY');
+    }
+
+    setTestStatus('success');
+    setTestResult('সুপাবেস কনফিগারেশন সংরক্ষণ হয়েছে! পেজ রিলোড করা হচ্ছে...');
+    setTimeout(() => {
+      window.location.reload();
+    }, 1500);
+  };
+
+  React.useEffect(() => {
+    // Attempt to load Admin configuration and credentials from Supabase dynamically (Sync across all domains)
+    async function loadSharedAdminConfig() {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('phone', 'ADMIN_CONFIG')
+          .single();
+
+        if (!error && data && data.avatarUrl) {
+          const config = JSON.parse(data.avatarUrl);
+          if (config) {
+            if (config.name) {
+              setAdminName(config.name);
+              localStorage.setItem('bunon_admin_name', config.name);
+            }
+            if (config.email) {
+              setAdminEmail(config.email);
+              localStorage.setItem('bunon_admin_email', config.email);
+            }
+            if (config.phone) {
+              setAdminPhone(config.phone);
+              localStorage.setItem('bunon_admin_phone', config.phone);
+            }
+            if (config.password) {
+              setAdminPassword(config.password);
+              localStorage.setItem('bunon_admin_password', config.password);
+            }
+            if (config.avatarUrl) {
+              setAdminAvatarUrl(config.avatarUrl);
+              localStorage.setItem('bunon_admin_avatar', config.avatarUrl);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load shared admin config on mount:', e);
+      }
+    }
+    loadSharedAdminConfig();
+  }, []);
 
   // Tab State
   const [activeTab, setActiveTab] = useState<'metrics' | 'orders' | 'products' | 'updates' | 'reviews'>('metrics');
@@ -259,6 +402,27 @@ export default function AdminPanel({
     upsertProfileInDb(updatedAdmin).catch(err => {
       console.error('Failed to sync admin profile modifications to Supabase:', err);
     });
+
+    // Sync full dynamic admin credentials & config metadata to Supabase under the shared special key
+    const adminConfigToSync = {
+      name: tempName,
+      email: tempEmail,
+      phone: tempPhone,
+      password: newPassVal || adminPassword,
+      avatarUrl: tempAvatar
+    };
+    (async () => {
+      try {
+        await supabase.from('profiles').upsert({
+          phone: 'ADMIN_CONFIG',
+          name: 'ADMIN_SETTINGS_METADATA',
+          email: tempEmail,
+          avatarUrl: JSON.stringify(adminConfigToSync)
+        });
+      } catch (err) {
+        console.error('Failed to sync admin config settings to Supabase:', err);
+      }
+    })();
 
     setNewPassVal('');
     setConfirmPassVal('');
@@ -586,10 +750,125 @@ export default function AdminPanel({
 
           <button 
             type="submit"
-            className="w-full bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-zinc-950 font-black uppercase tracking-widest py-4 rounded-xl text-xs transition-all transform active:scale-95 cursor-pointer shadow-lg shadow-amber-500/10"
+            className="w-full bg-gradient-to-r from-amber-500 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-zinc-950 font-black uppercase tracking-widest py-4 rounded-xl text-xs transition-all transform active:scale-95 cursor-pointer shadow-lg shadow-amber-500/10 hover:shadow-amber-500/20"
           >
             সুরক্ষিত লগইন সম্পাদন করুন
           </button>
+
+          {/* Troubleshooting Collapsible Card */}
+          <div className="mt-6 pt-5 border-t border-zinc-900">
+            <button
+              type="button"
+              onClick={() => setShowDiagnostics(!showDiagnostics)}
+              className="w-full flex items-center justify-between text-[11px] text-zinc-500 hover:text-zinc-300 font-bold tracking-wide cursor-pointer transition-all uppercase"
+            >
+              <span>⚙️ সুপাবেস ডাটাবেজ ও পাসওয়ার্ড হ্যান্ডলার</span>
+              <span className={`text-[9px] transform transition-transform ${showDiagnostics ? 'rotate-180' : ''}`}>▼</span>
+            </button>
+
+            {showDiagnostics && (
+              <div className="mt-4 p-4 bg-zinc-905 border border-zinc-850 rounded-2xl text-left space-y-4">
+                {/* 1. Status Check & Auto Setup */}
+                <div className="space-y-2">
+                  <p className="text-[10px] text-zinc-400 font-black tracking-wider uppercase">১. সংযোগ ও অ্যাডমিন ইন্সটলেশন:</p>
+                  
+                  {testStatus !== 'idle' && (
+                    <div className={`p-3 rounded-xl text-[10.5px] leading-relaxed font-semibold border ${
+                      testStatus === 'testing' ? 'bg-zinc-900 border-zinc-800 text-zinc-300' :
+                      testStatus === 'success' ? 'bg-emerald-950/45 border-emerald-900 text-emerald-300' :
+                      'bg-rose-955 border-rose-900 text-rose-300'
+                    }`}>
+                      {testStatus === 'testing' ? '⏳ প্রসেস হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন...' : testResult}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2 text-[10.5px] font-bold">
+                    <button
+                      type="button"
+                      disabled={testStatus === 'testing'}
+                      onClick={handleTestDatabase}
+                      className="py-2.5 px-3 bg-zinc-800 hover:bg-zinc-750 text-zinc-200 rounded-xl transition-all font-bold cursor-pointer text-center"
+                    >
+                      🔌 ডাটাবেজ টেস্ট করুন
+                    </button>
+                    <button
+                      type="button"
+                      disabled={testStatus === 'testing'}
+                      onClick={handleForceCreateAdminConfig}
+                      className="py-2.5 px-3 bg-amber-500 hover:bg-amber-400 text-zinc-950 rounded-xl transition-all font-black cursor-pointer text-center"
+                    >
+                      🔑 ডিফল্ট অ্যাডমিন সেটআপ
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Custom override input */}
+                <div className="space-y-3 pt-3 border-t border-zinc-850">
+                  <p className="text-[10px] text-zinc-400 font-black tracking-wider uppercase">২. সুপাবেস ম্যানুয়াল ক্রেডেনশিয়াল (প্রয়োজনে):</p>
+                  
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[10px] text-zinc-500 font-bold mb-1">SUPABASE URL:</label>
+                      <input
+                        type="text"
+                        placeholder="https://your-project.supabase.co"
+                        className="w-full text-[10.5px] bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-lg p-2 font-mono"
+                        value={customSupaUrl}
+                        onChange={(e) => setCustomSupaUrl(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-550 font-bold mb-1">SUPABASE ANON KEY:</label>
+                      <textarea
+                        rows={2}
+                        placeholder="eyJhbGciOi..."
+                        className="w-full text-[10.5px] bg-zinc-950 border border-zinc-805 text-zinc-300 rounded-lg p-2 font-mono resize-none"
+                        value={customSupaKey}
+                        onChange={(e) => setCustomSupaKey(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveCustomSupa}
+                      className="w-full py-2 bg-rose-600/20 hover:bg-rose-650/40 text-rose-300 border border-rose-900/50 rounded-xl text-[10px] font-black transition-all cursor-pointer text-center"
+                    >
+                      💾 ক্রেডেনশিয়াল সেভ করুন
+                    </button>
+                    {(localStorage.getItem('BUNON_SUPABASE_URL') || localStorage.getItem('BUNON_SUPABASE_ANON_KEY')) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem('BUNON_SUPABASE_URL');
+                          localStorage.removeItem('BUNON_SUPABASE_ANON_KEY');
+                          setCustomSupaUrl('');
+                          setCustomSupaKey('');
+                          setTestStatus('success');
+                          setTestResult('কনফিগ মুছে ফেলা হয়েছে! রিলোড করা হচ্ছে...');
+                          setTimeout(() => {
+                            if (typeof window !== 'undefined') window.location.reload();
+                          }, 1500);
+                        }}
+                        className="py-2 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded-xl text-[10px] font-bold transition-all cursor-pointer"
+                      >
+                        🗑️ রিসেট
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. Credentials reminder */}
+                <div className="text-[10px] text-zinc-500 leading-normal font-semibold space-y-1 bg-zinc-950/30 p-2.5 rounded-xl border border-zinc-900">
+                  <p className="font-bold text-zinc-400 text-[10.5px]">💡 ডিফল্ট অ্যাডমিন অ্যাক্সেস ইনফো:</p>
+                  <p>• ইউজারনেম: <span className="font-mono text-zinc-300 font-bold select-all">01855223656</span> অথবা <span className="font-mono text-zinc-300 font-bold select-all">masudbhuiyan1415@gmail.com</span></p>
+                  <p>• পাসওয়ার্ড: <span className="font-mono text-zinc-300 font-bold select-all">Masud@2005#</span></p>
+                  <p className="text-zinc-500 mt-1">নোট: আপনার ডাটাবেজে "profiles" সারণিটি সচল থাকতে হবে। কোনো কারণে Sync ব্যর্থ হলে প্রথমে ডাটাবেজ টেস্ট করে "ডিফল্ট অ্যাডমিন সেটআপ" বাটনে ক্লিক করুন।</p>
+                </div>
+              </div>
+            )}
+          </div>
         </form>
       </div>
     );
