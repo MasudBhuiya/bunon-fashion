@@ -508,7 +508,10 @@ export async function syncOrders(newList: Order[], oldList: Order[]) {
         status: item.status,
         date: item.date
       };
-      await supabase.from('orders').upsert(payload);
+      const { error } = await supabase.from('orders').upsert(payload);
+      if (error) {
+        console.error('👥 [Supabase Sync] Failed to upsert order in database:', error.message, 'Details:', error.details);
+      }
     }
   } catch (err) {
     console.error('syncOrders error:', err);

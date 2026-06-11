@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { Order, Product, Review, BrandUpdate, UserProfile } from '../types';
 import { upsertProfileInDb } from '../lib/db';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 
 interface AdminPanelProps {
   orders: Order[];
@@ -101,29 +101,76 @@ export default function AdminPanel({
     setTestStatus('testing');
     setTestResult('');
     try {
-      const { error } = await supabase.from('products').select('id').limit(1);
-      if (error) {
+      const results: string[] = [];
+      let hasError = false;
+
+      // 1. Check products
+      const { error: pErr } = await supabase.from('products').select('id').limit(1);
+      if (pErr) {
+        results.push(`❌ products table: ${pErr.message}`);
+        hasError = true;
+      } else {
+        results.push(`✅ products table: সফলভাবে সংযুক্ত`);
+      }
+
+      // 2. Check orders
+      const { error: oErr } = await supabase.from('orders').select('id').limit(1);
+      if (oErr) {
+        results.push(`❌ orders table: ${oErr.message}`);
+        hasError = true;
+      } else {
+        results.push(`✅ orders table: সফলভাবে সংযুক্ত`);
+      }
+
+      // 3. Check profiles
+      const { error: profErr } = await supabase.from('profiles').select('phone').limit(1);
+      if (profErr) {
+        results.push(`❌ profiles (user registry) table: ${profErr.message}`);
+        hasError = true;
+      } else {
+        results.push(`✅ profiles (প্রোফাইল) table: সফলভাবে সংযুক্ত`);
+      }
+
+      // 4. Check reviews
+      const { error: rErr } = await supabase.from('reviews').select('id').limit(1);
+      if (rErr) {
+        results.push(`❌ reviews table: ${rErr.message}`);
+        hasError = true;
+      } else {
+        results.push(`✅ reviews table: সফলভাবে সংযুক্ত`);
+      }
+
+      // 5. Check updates
+      const { error: uErr } = await supabase.from('updates').select('id').limit(1);
+      if (uErr) {
+        results.push(`❌ updates table: ${uErr.message}`);
+        hasError = true;
+      } else {
+        results.push(`✅ updates table: সফলভাবে সংযুক্ত`);
+      }
+
+      if (hasError) {
         setTestStatus('error');
-        setTestResult(`ডেটাবেজ রেসপন্স ত্রুটি: ${error.message}। সারণি বা কলামগুলো ঠিকমতো তৈরি করা হয়নি হয়তো।`);
+        setTestResult(`কিছু সমস্যা পাওয়া গিয়েছে:\n${results.join('\n')}\n\n⚠️ সমাধান নির্দেশিকা:\nআপনার Supabase ড্যাশবোর্ডের "SQL Editor" এ যান এবং প্রজেক্টের রুটে থাকা "supabase_setup.sql" ফাইলের সম্পূর্ণ কোডটি কপি করে সেখানে রান করুন। এটি সব সারণি এবং তাদের পারমিশন সঠিকভাবে তৈরি করবে।`);
       } else {
         const { data: configData, error: configError } = await supabase
           .from('profiles')
           .select('*')
           .eq('phone', 'ADMIN_CONFIG')
-          .single();
+          .maybeSingle();
 
         let extra = '';
-        if (configError) {
-          extra = ' (তবে ADMIN_CONFIG রো-টি পাওয়া যায়নি। নিচে "ডিফল্ট অ্যাডমিন সেটআপ করুন" বাটনে চাপ দিন)';
+        if (configError || !configData) {
+          extra = '\n\n• ADMIN_CONFIG ক্লাউড রেকর্ড নেই (নিচে "ডিফল্ট অ্যাডমিন সেটআপ" চাপুন)';
         } else {
-          extra = ' (এবং ক্লাউডে সংরক্ষিত অ্যাডমিন পাসওয়ার্ড সফলভাবে সিঙ্ক হয়েছে)';
+          extra = '\n\n• এবং ক্লাউডে সংরক্ষিত অ্যাডমিন পাসওয়ার্ড সিঙ্ক হতে প্রস্তুত!';
         }
         setTestStatus('success');
-        setTestResult(`সংযোগ সফল! সুপাবেস ডাটাবেজ সচল রয়েছে${extra}।`);
+        setTestResult(`অভিনন্দন! ৫টি গুরুত্বপূর্ণ টেবিলই আপনার ডাটাবেজে উপস্থিত রয়েছে!\n\n${results.join('\n')}${extra}`);
       }
     } catch (e: any) {
       setTestStatus('error');
-      setTestResult(`ভুল কনফিগারেশন বা নেটওয়ার্ক এরর: ${e.message || e}`);
+      setTestResult(`সুপাবেস কানেকশন এরর: ${e.message || e}`);
     }
   };
 
@@ -392,14 +439,22 @@ export default function AdminPanel({
         setPassError('পাসওয়ার্ড দুটি মেলেনি! অনুগ্রহ করে আবার চেক করুন।');
         return;
       }
-      localStorage.setItem('bunon_admin_password', newPassVal);
+      try {
+        localStorage.setItem('bunon_admin_password', newPassVal);
+      } catch (err) {
+        console.warn('Failed to write password to localStorage:', err);
+      }
       setAdminPassword(newPassVal);
     }
 
-    localStorage.setItem('bunon_admin_name', tempName);
-    localStorage.setItem('bunon_admin_email', tempEmail);
-    localStorage.setItem('bunon_admin_phone', tempPhone);
-    localStorage.setItem('bunon_admin_avatar', tempAvatar);
+    try {
+      localStorage.setItem('bunon_admin_name', tempName);
+      localStorage.setItem('bunon_admin_email', tempEmail);
+      localStorage.setItem('bunon_admin_phone', tempPhone);
+      localStorage.setItem('bunon_admin_avatar', tempAvatar);
+    } catch (err) {
+      console.warn('Quota exceeded or localStorage failure:', err);
+    }
 
     setAdminName(tempName);
     setAdminEmail(tempEmail);
@@ -450,7 +505,43 @@ export default function AdminPanel({
       const reader = new FileReader();
       reader.onloadend = () => {
         if (typeof reader.result === 'string') {
-          setTempAvatar(reader.result);
+          const rawResult = reader.result;
+          // Image optimization and scaling using HTML5 Canvas
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const maxDim = 200; // Resize to max 200px (ideal size for profile images)
+            let width = img.width;
+            let height = img.height;
+            
+            if (width > height) {
+              if (width > maxDim) {
+                height = Math.round((height * maxDim) / width);
+                width = maxDim;
+              }
+            } else {
+              if (height > maxDim) {
+                width = Math.round((width * maxDim) / height);
+                height = maxDim;
+              }
+            }
+            
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.drawImage(img, 0, 0, width, height);
+              // Store as JPEG at 80% quality to compress it to just ~10-15KB
+              const compressedBase64 = canvas.toDataURL('image/jpeg', 0.8);
+              setTempAvatar(compressedBase64);
+            } else {
+              setTempAvatar(rawResult);
+            }
+          };
+          img.onerror = () => {
+            setTempAvatar(rawResult);
+          };
+          img.src = rawResult;
         }
       };
       reader.readAsDataURL(file);
@@ -782,6 +873,20 @@ export default function AdminPanel({
 
             {showDiagnostics && (
               <div className="mt-4 p-4 bg-zinc-905 border border-zinc-850 rounded-2xl text-left space-y-4">
+                {/* Connection Status Panel */}
+                <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl space-y-1.5 text-[11px]">
+                  <p className="text-[10px] text-zinc-500 font-black tracking-wider uppercase">📡 সক্রিয় ডাটাবেজ কানেকশন:</p>
+                  <p className="font-mono text-zinc-300 break-all select-all font-bold bg-zinc-900 px-2 py-1 rounded border border-zinc-850">{supabaseUrl}</p>
+                  <div className="flex items-center gap-1.5 text-zinc-400 font-extrabold text-[10.5px]">
+                    <span>ধরন:</span>
+                    {localStorage.getItem('BUNON_SUPABASE_URL') ? (
+                      <span className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">🔒 নিজস্ব প্রাইভেট ডাটাবেজ (Manual Custom DB)</span>
+                    ) : (
+                      <span className="text-rose-400 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20">🌐 পাবলিক শেয়ার্ড ডিফল্ট (Default Developer DB)</span>
+                    )}
+                  </div>
+                </div>
+
                 {/* 1. Status Check & Auto Setup */}
                 <div className="space-y-2">
                   <p className="text-[10px] text-zinc-400 font-black tracking-wider uppercase">১. সংযোগ ও অ্যাডমিন ইন্সটলেশন:</p>
