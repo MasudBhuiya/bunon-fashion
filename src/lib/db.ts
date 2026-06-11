@@ -521,33 +521,49 @@ export async function syncOrders(newList: Order[], oldList: Order[]) {
  * ------------------------------------------------------------
  */
 
+export function normalizePhoneNumber(phone: string): string {
+  if (!phone) return '';
+  const digits = phone.replace(/\D/g, '');
+  // Bangladesh numbers have 11 digits starting with 01 e.g. 01855223656
+  // If it starts with 880 (e.g. 8801855223656 is 13 digits), strip 88 to leave 01855223656
+  if (digits.startsWith('880') && digits.length > 11) {
+    return digits.substring(2);
+  }
+  // If user typed 1855223656 (10 digits), prepend a '0'
+  if (digits.length === 10 && !digits.startsWith('0')) {
+    return '0' + digits;
+  }
+  return digits;
+}
+
 export async function fetchProfileFromDb(query: string): Promise<UserProfile | null> {
   try {
     const cleanQuery = query.trim().toLowerCase();
     if (!cleanQuery) return null;
     
-    // Support robust phone number prefix variations (e.g., matching +88018..., 88018..., 018...)
-    let corePhone = cleanQuery;
-    if (cleanQuery.startsWith('+880')) {
-      corePhone = cleanQuery.substring(3); // e.g. "018..." -> "018..."
-    } else if (cleanQuery.startsWith('880')) {
-      corePhone = cleanQuery.substring(2);
-    } else if (cleanQuery.startsWith('+88') && cleanQuery.length > 5) {
-      corePhone = cleanQuery.substring(3);
-    } else if (cleanQuery.startsWith('88') && cleanQuery.length > 5) {
-      corePhone = cleanQuery.substring(2);
-    }
+    // Normalization calculations
+    const normalizedQuery = normalizePhoneNumber(cleanQuery);
     
-    // Normalize to: "018...", "+88018...", "88018..."
+    // Generate phone variations for wide matching
     const phoneCandidates = [cleanQuery];
-    if (corePhone.startsWith('0')) {
-      phoneCandidates.push(corePhone);
-      phoneCandidates.push('+88' + corePhone);
-      phoneCandidates.push('88' + corePhone);
-    } else if (/^\d+$/.test(corePhone)) {
-      phoneCandidates.push('0' + corePhone);
-      phoneCandidates.push('+880' + corePhone);
-      phoneCandidates.push('880' + corePhone);
+    if (normalizedQuery) {
+      if (!phoneCandidates.includes(normalizedQuery)) {
+        phoneCandidates.push(normalizedQuery);
+      }
+      const rawDigits = normalizedQuery.startsWith('0') ? normalizedQuery.substring(1) : normalizedQuery;
+      const variations = [
+        normalizedQuery,
+        '0' + rawDigits,
+        '88' + normalizedQuery,
+        '+88' + normalizedQuery,
+        '880' + rawDigits,
+        '+880' + rawDigits
+      ];
+      variations.forEach(v => {
+        if (!phoneCandidates.includes(v)) {
+          phoneCandidates.push(v);
+        }
+      });
     }
 
     // Search by phone candidates using native .in() filter
@@ -582,11 +598,16 @@ export async function fetchProfileFromDb(query: string): Promise<UserProfile | n
       };
     }
     
-    // If table not found or query returned nothing, try to fall back to looking inside local storage registry
+    // Fallback search in browser localStorage with smart phone normalization
     const storedUsers = localStorage.getItem('bunon_registered_users');
     if (storedUsers) {
       const users: UserProfile[] = JSON.parse(storedUsers);
       const matched = users.find(u => {
+        const uPhoneNormalized = normalizePhoneNumber(u.phone);
+        const qPhoneNormalized = normalizePhoneNumber(cleanQuery);
+        if (uPhoneNormalized && qPhoneNormalized && uPhoneNormalized === qPhoneNormalized) {
+          return true;
+        }
         const uPhone = u.phone.trim().toLowerCase();
         return phoneCandidates.some(pc => uPhone === pc) || 
           (u.email && u.email.trim().toLowerCase() === cleanQuery);
@@ -598,21 +619,40 @@ export async function fetchProfileFromDb(query: string): Promise<UserProfile | n
   } catch (err) {
     console.error('Fetch profile exception, falling back:', err);
     // Local storage fallback
-    const storedUsers = localStorage.getItem('bunon_registered_users');
-    if (storedUsers) {
-      const users: UserProfile[] = JSON.parse(storedUsers);
-      const cleanQuery = query.trim().toLowerCase();
-      const matched = users.find(u => 
-        u.phone.trim().toLowerCase() === cleanQuery || 
-        (u.email && u.email.trim().toLowerCase() === cleanQuery)
-      );
-      if (matched) return matched;
-    }
+    try {
+      const storedUsers = localStorage.getItem('bunon_registered_users');
+      if (storedUsers) {
+        const users: UserProfile[] = JSON.parse(storedUsers);
+        const cleanQuery = query.trim().toLowerCase();
+        const qPhoneNormalized = normalizePhoneNumber(cleanQuery);
+        const matched = users.find(u => {
+          const uPhoneNormalized = normalizePhoneNumber(u.phone);
+          if (uPhoneNormalized && qPhoneNormalized && uPhoneNormalized === qPhoneNormalized) {
+            return true;
+          }
+          return u.phone.trim().toLowerCase() === cleanQuery || 
+                 (u.email && u.email.trim().toLowerCase() === cleanQuery);
+        });
+        if (matched) return matched;
+      }
+    } catch (e) {}
     return null;
   }
 }
 
 export async function upsertProfileInDb(profile: UserProfile): Promise<boolean> {
+  // Update local cache first so it is instant and reliable
+  try {
+    const storedUsers = localStorage.getItem('bunon_registered_users');
+    const users: UserProfile[] = storedUsers ? JSON.parse(storedUsers) : [];
+    const filtered = users.filter(u => 
+      normalizePhoneNumber(u.phone) !== normalizePhoneNumber(profile.phone)
+    );
+    localStorage.setItem('bunon_registered_users', JSON.stringify([profile, ...filtered]));
+  } catch (je) {
+    console.error('Failed to save to local registry cache', je);
+  }
+
   try {
     const { error } = await supabase
       .from('profiles')
@@ -624,38 +664,11 @@ export async function upsertProfileInDb(profile: UserProfile): Promise<boolean> 
       });
       
     if (error) {
-      console.error('upsertProfileInDb Supabase table error:', error);
-      if (!isUsingPlaceholder) {
-        throw error;
-      }
+      console.warn('upsertProfileInDb Supabase non-fatal table warning (using local fallback cache):', error);
     }
-
-    // Update local cache
-    try {
-      const storedUsers = localStorage.getItem('bunon_registered_users');
-      const users: UserProfile[] = storedUsers ? JSON.parse(storedUsers) : [];
-      const filtered = users.filter(u => 
-        u.phone.trim().toLowerCase() !== profile.phone.trim().toLowerCase()
-      );
-      localStorage.setItem('bunon_registered_users', JSON.stringify([profile, ...filtered]));
-    } catch (je) {
-      console.error('Failed to save to local registry cache', je);
-    }
-
     return true;
   } catch (err) {
-    console.error('upsertProfileInDb exception:', err);
-    if (!isUsingPlaceholder) {
-      throw err;
-    }
-    try {
-      const storedUsers = localStorage.getItem('bunon_registered_users');
-      const users: UserProfile[] = storedUsers ? JSON.parse(storedUsers) : [];
-      const filtered = users.filter(u => 
-        u.phone.trim().toLowerCase() !== profile.phone.trim().toLowerCase()
-      );
-      localStorage.setItem('bunon_registered_users', JSON.stringify([profile, ...filtered]));
-    } catch (je) {}
+    console.warn('upsertProfileInDb exception caught gracefully (using local fallback cache):', err);
     return true;
   }
 }

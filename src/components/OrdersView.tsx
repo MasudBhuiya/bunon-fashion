@@ -24,7 +24,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import { Order, UserProfile } from '../types';
-import { fetchProfileFromDb, upsertProfileInDb } from '../lib/db';
+import { fetchProfileFromDb, upsertProfileInDb, normalizePhoneNumber } from '../lib/db';
 
 interface OrdersViewProps {
   orders: Order[];
@@ -114,10 +114,19 @@ export default function OrdersView({
       // 2. If not found in the registry, search the order records as fallback
       if (!foundProfile) {
         const matchedOrders = orders.filter(
-          o => o.shippingInfo.phone.trim().toLowerCase() === query || 
-               o.shippingInfo.email.trim().toLowerCase() === query ||
-               o.shippingInfo.phone.includes(query) || 
-               o.shippingInfo.email.toLowerCase().includes(query)
+          o => {
+            const oPhoneNorm = normalizePhoneNumber(o.shippingInfo.phone);
+            const qPhoneNorm = normalizePhoneNumber(query);
+            if (oPhoneNorm && qPhoneNorm && oPhoneNorm === qPhoneNorm) {
+              return true;
+            }
+            const oEmailClean = o.shippingInfo.email.trim().toLowerCase();
+            const qClean = query.trim().toLowerCase();
+            return oEmailClean === qClean || 
+                   o.shippingInfo.phone.trim().toLowerCase() === qClean ||
+                   o.shippingInfo.phone.includes(query) || 
+                   o.shippingInfo.email.toLowerCase().includes(query);
+          }
         );
 
         if (matchedOrders.length > 0) {
@@ -281,9 +290,17 @@ export default function OrdersView({
   // Filter orders related to the active logged-in User Profile
   const filteredOrders = userProfile 
     ? orders.filter(
-        o => 
-          o.shippingInfo.phone.trim() === userProfile.phone.trim() || 
-          (userProfile.email && o.shippingInfo.email.toLowerCase().trim() === userProfile.email.toLowerCase().trim())
+        o => {
+          const oPhoneNorm = normalizePhoneNumber(o.shippingInfo.phone);
+          const uPhoneNorm = normalizePhoneNumber(userProfile.phone);
+          if (oPhoneNorm && uPhoneNorm && oPhoneNorm === uPhoneNorm) {
+            return true;
+          }
+          const oEmailClean = o.shippingInfo.email.trim().toLowerCase();
+          const uEmailClean = userProfile.email ? userProfile.email.trim().toLowerCase() : '';
+          return (uEmailClean && oEmailClean === uEmailClean) ||
+                 (o.shippingInfo.phone.trim().toLowerCase() === userProfile.phone.trim().toLowerCase());
+        }
       )
     : [];
 

